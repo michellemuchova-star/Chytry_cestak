@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// Chytrý Cesťák — model: users (profil + role), trips (cesty), vehicles (vozidla),
+// companySettings (sdílená nastavení). Zaměstnanec = vlastní data; role manager|hr|accountant|admin = přístup ke čtení
+// cizích trips/users a ke čtení vehicles (kvůli exportu vyúčtování).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function isMe(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Dokument přihlášeného uživatele musí existovat (jinak get() zhodí pravidlo).
+    function myUserDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function myRole() {
+      return myUserDocExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'employee';
+    }
+
+    // Správci / účetnictví — přístup k přehledům a exportům za organizaci
+    function isAdmin() {
+      return myRole() in ['manager', 'hr', 'accountant', 'admin'];
+    }
+
+    // ─── users ───────────────────────────────────────────────────────────────
+    // Čtení: já nebo správce. Zápis: vlastní profil; správce může upravit i cizí dokument (doplnění kraje u Euroinstitutu atd.).
+    // Citlivé změny rolí doporučuj držet přes konzoli / Cloud Functions.
+
+    match /users/{userId} {
+      allow read:   if isLoggedIn() && (isMe(userId) || isAdmin());
+      allow create: if isLoggedIn() && isMe(userId);
+      allow update: if isLoggedIn() && (isMe(userId) || isAdmin());
+      allow delete: if false;
+    }
+
+    // ─── trips ─────────────────────────────────────────────────────────────────
+    // Vlastník cesty nebo správce (filtrování podle organizace řeší aplikace).
+
+    match /trips/{tripId} {
+      allow read:   if isLoggedIn() && (isMe(resource.data.userId) || isAdmin());
+      allow create: if isLoggedIn() && isMe(request.resource.data.userId);
+      allow update: if isLoggedIn() && (isMe(resource.data.userId) || isAdmin());
+      // Smazat: správce kdykoliv; zaměstnanec jen rozpracovanou (active) nebo neodeslanou k jinému kroku (draft).
+      allow delete: if isLoggedIn() && (
+        isAdmin()
+        || (
+          isMe(resource.data.userId)
+          && resource.data.status in ["active", "draft"]
+        )
+      );
+    }
+
+    // ─── vehicles ─────────────────────────────────────────────────────────────
+    // Vlastník vozidla má plná práva. Správce má čtení (export 2. strany PDF, kontrola).
+
+    match /vehicles/{vehicleId} {
+      allow read:   if isLoggedIn() && (isMe(resource.data.userId) || isAdmin());
+      allow create: if isLoggedIn() && isMe(request.resource.data.userId);
+      allow update: if isLoggedIn() && isMe(resource.data.userId);
+      allow delete: if isLoggedIn() && isMe(resource.data.userId);
+    }
+
+    // ─── companySettings ───────────────────────────────────────────────────────
+
+    match /companySettings/{docId} {
+      allow read:  if isLoggedIn();
+      allow write: if isLoggedIn() && isAdmin();
+    }
+  }
+}
+
