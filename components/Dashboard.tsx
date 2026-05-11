@@ -197,11 +197,17 @@ export default function Dashboard({ user, demoData, onSignOut }: Props) {
       setSummary(result);
       setActiveTrip(null);
       setScreen("completed");
-      const recent = await getRecentTrips(user.uid);
-      setRecentTrips(recent);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chyba GPS. Zkus znovu.");
       setScreen("traveling");
+      return;
+    }
+    // Historie načti zvlášť — když selže, cesta už je uložená a uživatel musí vidět souhrn
+    try {
+      const recent = await getRecentTrips(user.uid);
+      setRecentTrips(recent);
+    } catch (e) {
+      console.error("getRecentTrips po ukončení cesty:", e);
     }
   };
 
@@ -423,6 +429,25 @@ export default function Dashboard({ user, demoData, onSignOut }: Props) {
                   <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z"/>
                 </svg>
                 V cíli
+              </button>
+            </div>
+          )}
+
+          {screen === "traveling" && !activeTrip && (
+            <div style={s.card}>
+              <div style={s.cardTitle}>Stav se nepovedl načíst</div>
+              <p style={{ ...s.hint, marginBottom: 14 }}>
+                Cesta mohla být už uložená. Zkus obnovit stránku, nebo pokračuj na úvod.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setScreen("idle");
+                }}
+                style={s.primaryBtn}
+              >
+                Zpět na úvod
               </button>
             </div>
           )}
